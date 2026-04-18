@@ -1,0 +1,168 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chat-backend
+  namespace: default
+  labels:
+    app: chat-backend
+    version: "1.0.0"
+spec:
+  # Start with 3 replicas for HA. Scale via HPA (see below).
+  # All pods are STATELESS — no per-pod local state.
+  # WebSocket stickiness is handled by Redis pub/sub (not session affinity).
+  replicas: 3
+  selector:
+    matchLabels:
+      app: chat-backend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Replace one pod at a time — ensures zero downtime deploys
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: chat-backend
+        version: "1.0.0"
+    spec:
+      # Security: don't run as root
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+
+      # Graceful shutdown: wait for in-flight requests to complete
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: chat-backend
+          image: your-registry/chat-backend:1.0.0  # Replace with your image
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+
+          # ============================================================
+          # Environment Variables
+          # Sensitive values come from Kubernetes Secrets (never hardcoded)
+          # Config values come from ConfigMaps
+          # ============================================================
+          env:
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: chat-backend-secrets
+                  key: db-url
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: chat-backend-secrets
+                  key: db-username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: chat-backend-secrets
+                  key: db-password
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: chat-backend-secrets
+                  key: jwt-secret
+            - name: JWT_EXPIRATION_MS
+              value: "86400000"
+            - name: SPRING_PROFILES_ACTIVE
+              value: "production"
+
+          # ============================================================
+          # Resource Limits
+          # Request: guaranteed minimum resources
+          # Limit: hard cap (OOMKill if exceeded)
+          # ============================================================
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+
+          # ============================================================
+          # Health Probes
+          # livenessProbe:  kill and restart if unhealthy
+          # readinessProbe: only route traffic when ready
+          # startupProbe:   give the JVM extra time to start up
+          # ============================================================
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            failureThreshold: 30       # 30 * 10s = 5 minutes max startup
+            periodSeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Security: read-only root filesystem
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+          volumeMounts:
+            - name: tmp-volume
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp-volume
+          emptyDir: {}
+
+---
+# ============================================================
+# HorizontalPodAutoscaler — auto-scale based on CPU usage
+# Scale up when avg CPU > 70%, scale down when < 70%
+# Min 2 pods (HA), max 10 pods
+# For WebSocket scaling: use custom metrics (active connections)
+# via Prometheus Adapter + KEDA for more precise scaling.
+# ============================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: chat-backend-hpa
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: chat-backend
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80

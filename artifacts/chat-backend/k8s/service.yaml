@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: chat-backend-service
+  namespace: default
+  labels:
+    app: chat-backend
+spec:
+  # ClusterIP: only accessible within the cluster.
+  # Expose externally via Ingress (NGINX, Traefik) or LoadBalancer.
+  type: ClusterIP
+  selector:
+    app: chat-backend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+
+---
+# ============================================================
+# Kubernetes Secret — store sensitive configuration
+# In production: use a secrets manager (AWS Secrets Manager,
+# HashiCorp Vault, Sealed Secrets) to populate Kubernetes Secrets.
+# NEVER commit secret values to git. This is a template only.
+# ============================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: chat-backend-secrets
+  namespace: default
+type: Opaque
+data:
+  # Base64-encode your actual values: echo -n 'value' | base64
+  db-url: amRiYzpwb3N0Z3Jlc3FsOi8vcG9zdGdyZXM6NTQzMi9jaGF0ZGI=  # REPLACE
+  db-username: Y2hhdHVzZXI=                                              # REPLACE
+  db-password: Y2hhdHBhc3N3b3Jk                                         # REPLACE
+  jwt-secret: eW91ci0yNTYtYml0LXNlY3JldC1rZXktY2hhbmdlLXRoaXM=        # REPLACE
+
+---
+# ============================================================
+# Ingress — expose the service to the public internet
+# Requires NGINX Ingress Controller (or Traefik/AWS ALB).
+# TLS termination happens at this layer.
+# ============================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: chat-backend-ingress
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    # WebSocket upgrade headers — required for STOMP/WebSocket traffic
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+    # Cert-manager TLS (install cert-manager in your cluster)
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.your-domain.com  # Replace with your domain
+      secretName: chat-backend-tls
+  rules:
+    - host: api.your-domain.com  # Replace with your domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: chat-backend-service
+                port:
+                  number: 80

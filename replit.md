@@ -3,6 +3,7 @@
 ## Overview
 
 pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
+Also contains a Java Spring Boot backend project for real-time chat.
 
 ## Stack
 
@@ -25,3 +26,42 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - `pnpm --filter @workspace/api-server run dev` — run API server locally
 
 See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
+
+## Java Spring Boot Chat Backend
+
+Located at: `artifacts/chat-backend/`
+
+A complete Telegram-like real-time chat backend. See `artifacts/chat-backend/README.md` for full docs.
+
+### Tech Stack
+- **Java 17** + Spring Boot 3.2
+- **Spring Security** + JWT (jjwt 0.11.5)
+- **WebSocket** + STOMP protocol for real-time messaging
+- **JPA/Hibernate** + PostgreSQL
+- **Lombok** for boilerplate reduction
+- **BCrypt** for password hashing
+
+### Architecture: Controller → Service → Repository
+
+| Layer | Classes |
+|---|---|
+| Controller | AuthController, ChatController, UserController |
+| Service | AuthService, ChatService, MessageService, UserService |
+| Repository | UserRepository, DirectChatRepository, GroupChatRepository, MessageRepository |
+| Security | JwtTokenProvider, JwtAuthenticationFilter, UserDetailsServiceImpl |
+| Model | User, DirectChat, GroupChat, Message, MessageStatus, MessageType |
+
+### Running Locally
+```bash
+cd artifacts/chat-backend
+export DB_URL=jdbc:postgresql://localhost:5432/chatdb
+export DB_USERNAME=chatuser
+export DB_PASSWORD=chatpassword
+export JWT_SECRET=your-256-bit-secret
+./mvnw spring-boot:run
+```
+
+### Infrastructure Files
+- `Dockerfile` — Multi-stage build (JDK build stage, JRE runtime stage)
+- `k8s/deployment.yaml` — K8s Deployment + HorizontalPodAutoscaler
+- `k8s/service.yaml` — K8s Service + Secret template + Ingress
